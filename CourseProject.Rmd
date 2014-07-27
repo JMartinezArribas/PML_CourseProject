@@ -1,0 +1,223 @@
+PRACTICAL MACHINE LEARNING - Course Project
+===========================================
+*"How did they do the exercise ?"*
+
+by Javier Martínez Arribas
+
+## Loading and preprocessing the data
+We can get the data from:
+
+[Training Data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+[Testing data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+The goal of this analysis is to predict the manner in which the subjects did the 
+recorded exercise. For this purpose we have got two data sets, one training set 
+and one testing set to apply our machine learning algorithm to twenty test cases.
+
+We will split the training set into a train and a test set to make our model.
+First of all we get the files from the web:
+
+```{r}
+library(caret)
+#Training Set
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+dest <- getwd()
+dest <- paste(dest,sep="","/pml-training.csv")
+download.file(url,destfile=dest,method="curl")
+training <- read.csv(dest,header=T)
+
+#Test Set
+url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+dest <- getwd()
+dest <- paste(dest,sep="","/pml-testing.csv")
+download.file(url,destfile=dest,method="curl")
+testing <- read.csv(dest,header=T)
+``` 
+
+**Pre processing**
+
+In order to address the problem of which predictors are better to construct the 
+model we are going to make a deconstruction of the training set: 
+First we separate the outcome from predictors. Outcome is the last column(classe):
+```{r}
+Y <- training[,160]
+X <- training[,-160]
+```
+
+Then we can see what classes of predictors there are:
+```{r}
+table(sapply(X[1, ], class))
+```
+
+Once we have the types, we could divide the predictors set in order to explore 
+deeply their importance for the final model.
+```{r}
+int <- sapply(X[1, ], class)=="integer"
+X_int <- X[,int]
+num <- sapply(X[1, ], class)=="numeric"
+X_num <- X[,num]
+fact <- sapply(X[1, ], class)=="factor"
+X_fact <- X[,fact]
+```
+ 
+For the first subset formed by integer predictors we can considerate to remove 
+some of them like:
+```{r}
+str(X_int)
+```
+The first predictor is just a counter of the rows in data set, so we can remove it:
+```{r}
+head(X_int$X)
+tail(X_int$X)
+```
+Now, we can examinate the predictors with too much NAs at first glance:
+```{r}
+dim(X_int[complete.cases(X_int$max_picth_belt),])[1]
+dim(X_int[complete.cases(X_int$min_pitch_belt),])[1]
+dim(X_int[complete.cases(X_int$amplitude_pitch_belt),])[1]
+dim(X_int[complete.cases(X_int$max_yaw_arm),])[1]
+dim(X_int[complete.cases(X_int$min_yaw_arm),])[1]
+dim(X_int[complete.cases(X_int$amplitude_yaw_arm),])[1]
+dim(X_int)[1]
+```
+We discover that there are 406 complete cases out of 19622 in these predictors,
+almost the 4%, so we could assume that there is not much relevant information into 
+so we remove them as well.
+We can remove also the time_stamp variables because we need to predict the way 
+the exercise is done and there is no need to know the execution time.
+```{r}
+X_int <- subset(X_int,select=-c(X,raw_timestamp_part_1,raw_timestamp_part_2,num_window,
+                                max_picth_belt,min_pitch_belt,amplitude_pitch_belt
+                                      ,max_yaw_arm,min_yaw_arm,amplitude_yaw_arm))
+dim(X_int[complete.cases(X_int),])[1]
+```
+As we can see now we have no NA values in this predictor subset.
+We could study the correlation between predictors to avoid some redundant
+information. We use the findCorrelation function in caret package.
+```{r}
+descrCor_int <- cor(X_int)
+highlyCorDescr_int <- findCorrelation(descrCor_int, cutoff = 0.8)
+X_int <- X_int[,-highlyCorDescr_int]
+```
+For the second predictors subset we are going to study numeric variables in the same way 
+as integer ones:
+```{r}
+str(X_num)
+```
+Now we have got the same problem as with the integer variables there are some of
+them with just 406 valid samples out of 19622, so we should remove them.
+```{r}
+for (i in 1:ncol(X_num)){
+  if (i==1){nAs=NULL}
+  nAs <- c(nAs,dim(X_num[complete.cases(X_num[,i]),])[1])
+}
+table(nAs)
+```
+and to remove just that columns...
+```{r}
+for (i in 1:ncol(X_num)){
+  if (i==1){nam <- NULL}
+  if ((dim(X_num[complete.cases(X_num[,i]),])[1]) == 406) {
+    nam <- c(nam,colnames(X_num)[i])
+  }
+}
+indices <- which(names(X_num) %in% nam)
+X_num <- X_num[,-indices]
+```
+We can study the correlation between predictors in this subset as well:
+```{r}
+descrCor_num <- cor(X_num)
+highlyCorDescr_num <- findCorrelation(descrCor_num, cutoff = 0.75)
+X_num <- X_num[,-highlyCorDescr_num]
+```
+
+And the last step in order to get the most appropriate information for our model,
+we study the most relevant factor predictors.
+In this subset we have different cases to address to, like character variables in
+factor format as well as date variables. We have also some factor variables with 
+two levels, one of them "" and the other one "#DIV/0!", a kind of notation for 
+error values in excel files. 
+We have some numeric variables format as factor, categorical and binary ones.
+I consider that we should not take into account this subset of predictors due to 
+the few information contained into.
+Just in order to show the huge number of zero values we are going to transform 
+factor variables into numeric ones after removing some of no sense predictors.
+```{r}
+X_fact <- subset(X_fact,select=-c(new_window,user_name,cvtd_timestamp,kurtosis_yaw_belt,
+                                         skewness_yaw_belt,amplitude_yaw_belt,
+                                         kurtosis_yaw_dumbbell,skewness_yaw_dumbbell,
+                                         amplitude_yaw_dumbbell,kurtosis_yaw_forearm,
+                                         skewness_yaw_forearm,amplitude_yaw_forearm))
+```
+and transform the rest in numeric variables:
+```{r warning=FALSE,message=FALSE}
+for(i in 1:ncol(X_fact)){
+  #Take the index where there are negative values
+  ind <- grep("-",X_fact[,i])
+  X_fact[,i] <- gsub("-","",X_fact[,i])
+  X_fact[,i] <- invisible(as.numeric(X_fact[,i]))
+  bad <- is.na(X_fact[,i])
+  X_fact[bad,i] <- 0
+  X_fact[ind,i]=X_fact[ind,i]*(-1)
+}
+head(X_fact)
+```
+We can see that a large number of rows are zero values.
+```{r}
+row_sub = apply(X_fact, 1, function(row) all(row ==0 ))
+table(row_sub)
+```
+There are just 406 no zero rows out of 12622 rows. Almost a 4%
+of the entire dataset.
+After studying the different types of predictors we concatenate the predictors 
+subsets together. Discarding factor transformed predictors:
+```{r}
+training_final <- cbind(Y,X_int,X_num)
+```
+
+Now we can define the control structure for training:
+```{r}
+set.seed(123)
+ind <- createFolds(Y,returnTrain=TRUE)
+cont <- trainControl(method="cv",index=ind)
+```
+For tune the desired model and calculate the accuracy of it we split the 
+training set into a train and a test subset.
+We fit a Random Forest method for this classification problem. In order not to waste
+too much time nor computation resources we will select just ten trees and even so
+we will get good predictions for our final exercise.
+I did try to compute it with a higher number of trees in random forest but final 
+predictions did not change.
+```{r}
+set.seed(123)
+mtryVals <- floor(seq(10,ncol(training_final[,-1]),length=10))
+mtryGrid <- data.frame(.mtry=mtryVals)
+inTrain <- createDataPartition(training_final$Y,p = .8, list = FALSE)
+train <- training_final[inTrain,]
+test <- training_final[-inTrain,]
+rfTune <- train(x = training_final[,-1], y = training_final[,1], method = "rf", 
+                tuneGrid=mtryGrid,ntree=10, importance=TRUE, trControl = cont)
+pred_train <- predict(rfTune,train)
+ISerror <- sum(pred_train != train$Y) * 100 / nrow(train)
+ISerror
+```
+We get an in sample error of almost 0.02%.
+and we observe an accuracy and an out of sample error of:
+```{r}
+pred <- predict(rfTune,test)
+table(pred,test$Y)
+confusionMatrix(pred,test$Y)
+OOSerror <- sum(pred != test$Y) * 100 / nrow(test)
+OOSerror
+```
+We obtain a low out of sample error 0.05% and an accuracy of 99.95%.
+Finally, we are going to use the testing file to complete the prediction exercise.
+First we need to select just the predictors that we are going to need..
+```{r}
+indices <- which(names(testing) %in% names(train))
+testing <- testing[,indices]
+pred_final <- predict(rfTune,testing)
+pred_final
+```
+Finally we get a random forest model for 43 predictors with a high accuracy and
+a low out of sample error.
